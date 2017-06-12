@@ -121,6 +121,11 @@ module Bosh::Director
           cloud_properties == other.cloud_properties &&
             size == other.size && name == other.name
         end
+
+        def size_diff_only?(other)
+          cloud_properties == other.cloud_properties &&
+            size != other.size && name == other.name
+        end
       end
 
       class NewPersistentDisk < PersistentDisk

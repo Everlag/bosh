@@ -441,7 +441,7 @@ elsif p('blobstore.provider') == 'gcs'
   end
 
   encryption_key = p(['agent.blobstore.encryption_key', 'blobstore.encryption_key'], nil)
-  unless storage_class.nil?
+  unless encryption_key.nil?
     agent_blobstore_options['encryption_key'] = encryption_key
   end
 else

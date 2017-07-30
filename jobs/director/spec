@@ -29,7 +29,7 @@ packages:
 - director
 - nginx
 - libpq
-- postgres
+- postgres-9.4
 - mysql
 - ruby
 - s3cli
@@ -92,6 +92,9 @@ properties:
   director.max_threads:
     description: Max number of director concurrent threads
     default: 32
+  director.enable_cpi_resize_disk:
+    description: Enable/Disable native CPI disk resizing (true|false)
+    default: false
   director.enable_snapshots:
     description: Enable/Disable snapshots for persistent disks (true|false)
     default: false
@@ -138,6 +141,9 @@ properties:
     default: false
   director.local_dns.include_index:
     description: If local DNS is enabled, then include_index will cause director to propagate dns records with instance index number as well as dns records with instance ID
+    default: false
+  director.local_dns.use_dns_addresses:
+    description: When true, address references in rendered templates will evaluate to DNS entries rather than IP addresses
     default: false
 
   #Orphaned disk and orphaned snapshot automated cleanup

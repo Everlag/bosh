@@ -1,6 +1,10 @@
 <%=
 params = {
   'name' => p('director.name'),
+  'runtime' => {
+    'ip' => spec.ip,
+    'instance' => "#{spec.job.name}/#{spec.id}",
+  },
   'port' => p('director.backend_port'),
   'encryption' => p('director.encryption'),
   'max_tasks' => p('director.max_tasks'),
@@ -26,6 +30,7 @@ params = {
   'max_vm_create_tries' => p('director.max_vm_create_tries'),
   'enable_post_deploy' => p('director.enable_post_deploy'),
   'enable_nats_delivered_templates' => p('director.enable_nats_delivered_templates'),
+  'enable_cpi_resize_disk' => p('director.enable_cpi_resize_disk'),
   'generate_vm_passwords' => p('director.generate_vm_passwords'),
   'remove_dev_tools' => p('director.remove_dev_tools'),
   'log_access_events_to_syslog' => p('director.log_access_events_to_syslog'),
@@ -33,6 +38,7 @@ params = {
   'local_dns' => {
       'enabled' => p('director.local_dns.enabled'),
       'include_index' => p('director.local_dns.include_index'),
+      'use_dns_addresses' => p('director.local_dns.use_dns_addresses'),
   },
 }
 

@@ -41,7 +41,8 @@ module Bosh::Director
         :enable_virtual_delete_vms,
         :local_dns,
         :verify_multidigest_path,
-        :version
+        :version,
+        :enable_cpi_resize_disk
       )
 
       attr_reader(
@@ -51,7 +52,8 @@ module Bosh::Director
         :director_ips,
         :config_server_enabled,
         :config_server,
-        :enable_nats_delivered_templates
+        :enable_nats_delivered_templates,
+        :runtime
       )
 
       def clear
@@ -125,6 +127,10 @@ module Bosh::Director
         @compiled_package_cache_options = config['compiled_package_cache']
         @name = config['name'] || ''
 
+        @runtime = config.fetch('runtime', {})
+        @runtime['ip'] ||= '127.0.0.1'
+        @runtime['instance'] ||= 'unknown'
+
         @compiled_package_cache = nil
 
         @db_config = config['db']
@@ -150,6 +156,7 @@ module Bosh::Director
 
         @local_dns_enabled = config.fetch('local_dns', {}).fetch('enabled', false)
         @local_dns_include_index = config.fetch('local_dns', {}).fetch('include_index', false)
+        @local_dns_use_dns_addresses = config.fetch('local_dns', {}).fetch('use_dns_addresses', false)
 
         # UUID in config *must* only be used for tests
         @uuid = config['uuid'] || Bosh::Director::Models::DirectorAttribute.find_or_create_uuid(@logger)
@@ -192,6 +199,7 @@ module Bosh::Director
           raise ArgumentError, 'Multiple Digest binary must be specified'
         end
         @verify_multidigest_path = config['verify_multidigest_path']
+        @enable_cpi_resize_disk = config.fetch('enable_cpi_resize_disk', false)
       end
 
       def log_director_start
@@ -229,6 +237,10 @@ module Bosh::Director
 
       def local_dns_include_index?
         !!@local_dns_include_index
+      end
+
+      def local_dns_use_dns_addresses?
+        !!@local_dns_use_dns_addresses
       end
 
       def get_revision

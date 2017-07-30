@@ -118,6 +118,12 @@ module Bosh::Director
         end
       end
 
+      def runs_as_errand?
+        @release.bind_model
+        @release.bind_templates
+        !@model.nil? && @model.runs_as_errand?
+      end
+
       def consumes_links_for_instance_group_name(instance_group_name)
         links_of_kind_for_instance_group_name(instance_group_name, 'consumes')
       end
@@ -231,6 +237,12 @@ module Bosh::Director
 
         if source.has_key?('properties') && !source.has_key?('instances')
           errors.push("Cannot specify 'properties' without 'instances' for link '#{link_name}' in job '#{@name}' in instance group '#{instance_group_name}'.")
+        end
+
+        if source.has_key?('ip_addresses')
+          unless !!source['ip_addresses'] == source['ip_addresses']
+            errors.push("Cannot specify non boolean values for 'ip_addresses' field for link '#{link_name}' in job '#{@name}' in instance group '#{instance_group_name}'.")
+          end
         end
 
         errors

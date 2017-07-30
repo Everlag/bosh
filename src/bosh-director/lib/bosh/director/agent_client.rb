@@ -110,6 +110,19 @@ module Bosh::Director
       send_message(:unmount_disk, *args)
     end
 
+    def info(*args)
+      begin
+        send_message(:info, *args)
+      rescue RpcRemoteException => e
+        if e.message =~ /unknown message/
+          @logger.warn("Ignoring info 'unknown message' error from the agent: #{e.inspect}")
+          { 'api_version' => 0 }
+        else
+          raise
+        end
+      end
+    end
+
     def delete_arp_entries(*args)
       fire_and_forget(:delete_arp_entries, *args)
     end
@@ -133,6 +146,9 @@ module Bosh::Director
         if e.message =~ /unknown message/
           @logger.warn("'upload_blob' 'unknown message' error from the agent: #{e.inspect}")
           raise Bosh::Director::AgentUnsupportedAction, 'Unsupported action: upload_blob'
+        elsif e.message =~ /Opening blob store file: open \\var\\vcap\\data\\blobs.*: The system cannot find the path specified/
+          @logger.warn("'upload_blob' error from the agent: #{e.inspect}")
+          raise Bosh::Director::AgentUploadBlobUnableToOpenFile, "'Upload blob' action: failed to open blob"
         else
           raise
         end

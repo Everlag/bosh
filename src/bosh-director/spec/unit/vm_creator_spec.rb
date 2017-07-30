@@ -32,6 +32,7 @@ module Bosh
         BD::DeploymentPlan::AvailabilityZone.new('az-1', {})
       end
       let(:cloud_properties) { {'ram' => '2gb'} }
+      let(:network_cloud_properties) { {'bandwidth' => '5mbps'} }
       let(:vm_type) { DeploymentPlan::VmType.new({'name' => 'fake-vm-type', 'cloud_properties' => cloud_properties}) }
       let(:stemcell_model) { Models::Stemcell.make(:cid => 'stemcell-id', name: 'fake-stemcell', version: '123') }
       let(:stemcell) do
@@ -53,12 +54,10 @@ module Bosh
           logger
         )
         instance.bind_existing_instance_model(instance_model)
-        allow(instance).to receive(:apply_spec).and_return({})
-        allow(instance).to receive(:spec).and_return({})
         instance
       end
       let(:reservation) do
-        subnet = BD::DeploymentPlan::DynamicNetworkSubnet.new('dns', {'ram' => '2gb'}, ['az-1'])
+        subnet = BD::DeploymentPlan::DynamicNetworkSubnet.new('dns', network_cloud_properties, ['az-1'])
         network = BD::DeploymentPlan::DynamicNetwork.new('name', [subnet], logger)
         reservation = BD::DesiredNetworkReservation.new_dynamic(instance_model, network)
       end
@@ -188,15 +187,15 @@ module Bosh
         allow(agent_broadcaster).to receive(:delete_arp_entries)
         allow(Config).to receive(:current_job).and_return(update_job)
         allow(Config.cloud).to receive(:delete_vm)
-        allow(CloudFactory).to receive(:new).and_return(cloud_factory)
+        allow(CloudFactory).to receive(:create_with_latest_configs).and_return(cloud_factory)
         allow(Bosh::Director::Config).to receive(:event_log).and_return(event_log)
-        allow(cloud_factory).to receive(:for_availability_zone!).with(instance_model.availability_zone).and_return(cloud)
-        allow(cloud_factory).to receive(:for_availability_zone).with(instance_model.availability_zone).and_return(cloud)
+        allow(cloud_factory).to receive(:get_name_for_az).with(instance_model.availability_zone).and_return('cpi1')
+        allow(cloud_factory).to receive(:get).with('cpi1').and_return(cloud)
       end
 
       context 'with existing cloud config' do
         let(:non_default_cloud_factory) { instance_double(CloudFactory) }
-        let(:stemcell_model_cpi) { Models::Stemcell.make(:cid => 'old-stemcell-id', name: 'fake-stemcell', version: '123', :cpi => 'something') }
+        let(:stemcell_model_cpi) { Models::Stemcell.make(:cid => 'old-stemcell-id', name: 'fake-stemcell', version: '123', :cpi => 'cpi1') }
         let(:stemcell) do
           stemcell_model
           stemcell_model_cpi
@@ -205,13 +204,10 @@ module Bosh
           stemcell
         end
 
-        before do
-          expect(non_default_cloud_factory).to receive(:for_availability_zone!).with(instance_model.availability_zone).at_least(:once).and_return(cloud)
-        end
-
         it 'uses the outdated cloud config from the existing deployment' do
           expect(CloudFactory).to receive(:create_from_deployment).and_return(non_default_cloud_factory)
-          expect(non_default_cloud_factory).to receive(:lookup_cpi_for_az).and_return 'something'
+          expect(non_default_cloud_factory).to receive(:get_name_for_az).with('az1').at_least(:once).and_return 'cpi1'
+          expect(non_default_cloud_factory).to receive(:get).with('cpi1').at_least(:once).and_return(cloud)
           expect(cloud).to receive(:create_vm).with(
             kind_of(String), 'old-stemcell-id', kind_of(Hash), network_settings, kind_of(Array), kind_of(Hash)
           ).and_return('new-vm-cid')
@@ -223,7 +219,9 @@ module Bosh
           let(:instance_model) { Models::Instance.make(uuid: SecureRandom.uuid, index: 5, job: 'fake-job', deployment: deployment, availability_zone: '') }
 
           it 'uses any cloud config if availability zones are not used, even though requested' do
-            expect(non_default_cloud_factory).to receive(:lookup_cpi_for_az).and_return ''
+            expect(non_default_cloud_factory).to receive(:get_name_for_az).at_least(:once).and_return ''
+            expect(non_default_cloud_factory).to receive(:get).with('').at_least(:once).and_return(cloud)
+
             expect(CloudFactory).to receive(:create_from_deployment).and_return(non_default_cloud_factory)
             expect(cloud).to receive(:create_vm).with(
               kind_of(String), 'stemcell-id', kind_of(Hash), network_settings, kind_of(Array), kind_of(Hash)
@@ -456,7 +454,7 @@ module Bosh
       end
 
       context 'when instance already has associated active_vm' do
-        let(:old_vm) { Models::Vm.make(instance: instance_model) }
+        let(:old_vm) { Models::Vm.make(instance: instance_model, cpi: 'cpi1') }
 
         before { instance_model.active_vm = old_vm }
 
@@ -522,13 +520,10 @@ module Bosh
       end
 
       it 'should destroy the VM if the Config.keep_unreachable_vms flag is false' do
-        cloud_collection = instance_double('Bosh::Director::CloudCollection')
-
-        expect(cloud_factory).to receive(:for_availability_zone).with(instance_model.availability_zone).at_least(:once).and_return(cloud_collection)
-
         Config.keep_unreachable_vms = false
+
         expect(cloud).to receive(:create_vm).and_return('new-vm-cid')
-        expect(cloud_collection).to receive(:delete_vm)
+        expect(cloud).to receive(:delete_vm)
 
         expect(instance).to receive(:update_instance_settings).once.and_raise(Bosh::Clouds::VMCreationFailed.new(false))
 
@@ -599,11 +594,57 @@ module Bosh
         end
       end
 
-      context 'env interpolation' do
+      context 'cloud_properties, networks_settings, env interpolation' do
         let(:client_factory) { double(Bosh::Director::ConfigServer::ClientFactory) }
-        let(:config_server_client) { double(Bosh::Director::ConfigServer::EnabledClient) }
+        let(:config_server_client) { double(Bosh::Director::ConfigServer::ConfigServerClient) }
 
         let(:instance_spec) { instance_double('Bosh::Director::DeploymentPlan::InstanceSpec') }
+
+        let(:cloud_properties) do
+          {
+            'a' => 'bar',
+            'b' => '((smurf_placeholder))',
+            'c' => '((gargamel_placeholder))'
+          }
+        end
+
+        let(:resolved_cloud_properties) do
+          {
+            'a' => 'bar',
+            'b' => 'blue',
+            'c' => 'green'
+          }
+        end
+
+        let(:network_cloud_properties) do
+          {'network-v1' => '((find-me))'}
+        end
+
+        let(:resolved_network_cloud_properties) do
+          {'network-v1' => 'resolved-name'}
+        end
+
+        let(:unresolved_networks_settings) do
+          {
+            'name' => {
+              'type' => 'dynamic',
+              'cloud_properties' => network_cloud_properties,
+              'dns' => 'dns',
+              'default' => ['gateway']
+            }
+          }
+        end
+
+        let(:resolved_networks_settings) do
+          {
+            'name' => {
+              'type' => 'dynamic',
+              'cloud_properties' => resolved_network_cloud_properties,
+              'dns' => 'dns',
+              'default' => ['gateway']
+            }
+          }
+        end
 
         let(:env_hash) do
           {
@@ -612,6 +653,7 @@ module Bosh
             'gargamel' => '((gargamel_placeholder))'
           }
         end
+
         let(:env) do
           DeploymentPlan::Env.new(
             env_hash
@@ -626,50 +668,7 @@ module Bosh
           }
         end
 
-        before do
-          allow(instance_spec).to receive(:as_apply_spec).and_return({})
-          allow(instance_spec).to receive(:full_spec).and_return({})
-          allow(instance_spec).to receive(:as_template_spec).and_return({})
-          allow(instance_plan).to receive(:spec).and_return(instance_spec)
-          allow(Bosh::Director::ConfigServer::ClientFactory).to receive(:create).and_return(client_factory)
-          allow(client_factory).to receive(:create_client).and_return(config_server_client)
-        end
-
-        it 'should happen' do
-          expect(config_server_client).to receive(:interpolate_with_versioning).with(env_hash, anything).and_return(resolved_env_hash)
-          expect(config_server_client).to receive(:interpolate_with_versioning).with(cloud_properties, anything).and_return(cloud_properties)
-
-          expect(cloud).to receive(:create_vm) do |_, _, _, _, _, env|
-            expect(env['foo']).to eq('bar')
-            expect(env['smurf']).to eq('blue')
-            expect(env['gargamel']).to eq('green')
-          end.and_return('new-vm-cid')
-
-          subject.create_for_instance_plan(instance_plan, ['fake-disk-cid'], tags)
-        end
-      end
-
-      context 'cloud-config interpolation' do
-        let(:client_factory) { double(Bosh::Director::ConfigServer::ClientFactory) }
-        let(:config_server_client) { double(Bosh::Director::ConfigServer::EnabledClient) }
-
-        let(:instance_spec) { instance_double('Bosh::Director::DeploymentPlan::InstanceSpec') }
-
-        let(:cloud_properties) do
-          {
-              'foo' => 'bar',
-              'smurf' => '((smurf_placeholder))',
-              'gargamel' => '((gargamel_placeholder))'
-          }
-        end
-
-        let(:resolved_cloud_properties) do
-          {
-              'foo' => 'bar',
-              'smurf' => 'blue',
-              'gargamel' => 'green'
-          }
-        end
+        let(:desired_variable_set) { instance_double(Bosh::Director::Models::VariableSet) }
 
         before do
           allow(instance_spec).to receive(:as_apply_spec).and_return({})
@@ -681,13 +680,16 @@ module Bosh
         end
 
         it 'should happen' do
-          expect(config_server_client).to receive(:interpolate_with_versioning).with({}, anything).and_return({})
-          expect(config_server_client).to receive(:interpolate_with_versioning).with(cloud_properties, anything).and_return(resolved_cloud_properties)
+          instance_plan.instance.desired_variable_set = desired_variable_set
 
-          expect(cloud).to receive(:create_vm) do |_, _, cloud_properties, _, _, _|
-            expect(cloud_properties['foo']).to eq('bar')
-            expect(cloud_properties['smurf']).to eq('blue')
-            expect(cloud_properties['gargamel']).to eq('green')
+          expect(config_server_client).to receive(:interpolate_with_versioning).with(env_hash, desired_variable_set).and_return(resolved_env_hash)
+          expect(config_server_client).to receive(:interpolate_with_versioning).with(cloud_properties, desired_variable_set).and_return(resolved_cloud_properties)
+          expect(config_server_client).to receive(:interpolate_with_versioning).with(unresolved_networks_settings, desired_variable_set).and_return(resolved_networks_settings)
+
+          expect(cloud).to receive(:create_vm) do |_, _, cloud_properties_param, network_settings_param, _, env_param|
+            expect(cloud_properties_param).to eq(resolved_cloud_properties)
+            expect(network_settings_param).to eq(resolved_networks_settings)
+            expect(env_param).to eq(resolved_env_hash)
           end.and_return('new-vm-cid')
 
           subject.create_for_instance_plan(instance_plan, ['fake-disk-cid'], tags)

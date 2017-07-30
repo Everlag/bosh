@@ -106,8 +106,12 @@ describe Bosh::Director::Config do
     context 'when hash has value set' do
       it 'returns the configuration value' do
         test_config['local_dns']['enabled'] = true
+        test_config['local_dns']['include_index'] = true
+        test_config['local_dns']['use_dns_addresses'] = true
         described_class.configure(test_config)
         expect(described_class.local_dns_enabled?).to eq(true)
+        expect(described_class.local_dns_include_index?).to eq(true)
+        expect(described_class.local_dns_use_dns_addresses?).to eq(true)
       end
     end
 
@@ -115,6 +119,8 @@ describe Bosh::Director::Config do
       it 'returns default value of false' do
         described_class.configure(test_config)
         expect(described_class.local_dns_enabled?).to eq(false)
+        expect(described_class.local_dns_include_index?).to eq(false)
+        expect(described_class.local_dns_use_dns_addresses?).to eq(false)
       end
     end
   end
@@ -408,6 +414,33 @@ describe Bosh::Director::Config do
       expect(event.object_type).to eq('director')
       expect(event.object_name).to eq('director-uuid')
       expect(event.context).to eq({'version' => '0.0.2'})
+    end
+  end
+
+  describe 'enable_cpi_resize_disk' do
+    it 'defaults to false' do
+      described_class.configure(test_config)
+      expect(described_class.enable_cpi_resize_disk).to be_falsey
+    end
+
+    context 'when explicitly set' do
+      context 'when set to true' do
+        before { test_config['enable_cpi_resize_disk'] = true }
+
+        it 'resolves to true' do
+          described_class.configure(test_config)
+          expect(described_class.enable_cpi_resize_disk).to be_truthy
+        end
+      end
+
+      context 'when set to false' do
+        before { test_config['enable_cpi_resize_disk'] = false }
+
+        it 'resolves to false' do
+          described_class.configure(test_config)
+          expect(described_class.enable_cpi_resize_disk).to be_falsey
+        end
+      end
     end
   end
 end

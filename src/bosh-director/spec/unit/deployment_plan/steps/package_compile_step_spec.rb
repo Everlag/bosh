@@ -85,9 +85,6 @@ module Bosh::Director
 
       allow(instance_deleter).to receive(:delete_instance_plan)
 
-      @blobstore = double(:blobstore)
-      allow(Config).to receive(:blobstore).and_return(@blobstore)
-
       @director_job = instance_double('Bosh::Director::Jobs::BaseJob')
       allow(Config).to receive(:current_job).and_return(@director_job)
       allow(@director_job).to receive(:task_cancelled?).and_return(false)
@@ -332,7 +329,10 @@ module Bosh::Director
             expect(compiler).to receive(:with_compile_lock).with(package.id, "#{@stemcell_b.os}/#{@stemcell_b.version}", deployment.name).and_yield
           end
 
-          expect(vm_creator).to receive(:create_for_instance_plan).exactly(6).times
+          expect(vm_creator).to receive(:create_for_instance_plan).exactly(6).times do |instance_plan|
+            # metadata_updater is called for every package compilation, and it expects there to be an active_vm
+            instance_plan.instance.model.active_vm = Models::Vm.make(cid: instance_plan.instance.model.id, instance: instance_plan.instance.model)
+          end
 
           agent_client = instance_double('Bosh::Director::AgentClient')
           allow(BD::AgentClient).to receive(:with_vm_credentials_and_agent_id).and_return(agent_client)
@@ -564,7 +564,10 @@ module Bosh::Director
       it 'reuses compilation VMs' do
         prepare_samples
 
-        expect(vm_creator).to receive(:create_for_instance_plan).exactly(1).times
+        expect(vm_creator).to receive(:create_for_instance_plan).exactly(1).times do |instance_plan|
+          # metadata_updater is called for every package compilation, and it expects there to be an active_vm
+          instance_plan.instance.model.active_vm = Models::Vm.make(cid: instance_plan.instance.model.id, instance: instance_plan.instance.model)
+        end
 
         agent_client = instance_double('BD::AgentClient')
         allow(BD::AgentClient).to receive(:with_vm_credentials_and_agent_id).and_return(agent_client)
@@ -833,7 +836,6 @@ module Bosh::Director
           Bosh::Director::Config.trusted_certs = DIRECTOR_TEST_CERTS
 
           allow(cloud).to receive(:create_vm).and_return('new-vm-cid')
-          allow(vm_creator).to receive(:apply_state)
           allow(AgentClient).to receive_messages(with_vm_credentials_and_agent_id: client)
           allow(cloud).to receive(:delete_vm)
           allow(client).to receive(:update_settings)
